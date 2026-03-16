@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Livelli uditivi - Pro</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --accent: #38bdf8;
+    }
+    body { 
+      margin: 0; background: var(--bg); font-family: 'Segoe UI', sans-serif; 
+      display: flex; flex-direction: column; align-items: center; padding: 20px; color: white;
+    }
+    .header { text-align: center; margin-bottom: 20px; }
+    #container { display: flex; flex-direction: row; gap: 20px; background: #1e293b; padding: 15px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    
+    .panel { position: relative; width: 640px; height: 480px; border-radius: 10px; overflow: hidden; border: 2px solid #334155; }
+    
+    /* Cruciale: dimensioni fisse per evitare zoom */
+    canvas, video { position: absolute; top: 0; left: 0; width: 640px !important; height: 480px !important; }
+    
+    video { transform: scaleX(-1); } 
+    #output_canvas { transform: scaleX(-1); } 
+    
+    .controls { 
+      position: absolute; top: 10px; right: 10px; z-index: 3; 
+      background: rgba(15, 23, 42, 0.9); padding: 12px; border-radius: 10px; 
+      font-size: 12px; border: 1px solid var(--accent);
+    }
+    
+    #btnNext {
+      position: absolute; bottom: 15px; left: 15px; z-index: 10;
+      padding: 12px 24px; cursor: pointer; background: var(--accent);
+      color: #0f172a; border: none; border-radius: 50px; font-weight: bold;
+      transition: transform 0.2s;
+    }
+    #btnNext:hover { transform: scale(1.05); }
+
+    .instructions {
+      margin-top: 20px; width: 100%; max-width: 1300px;
+      padding: 15px; background: rgba(56, 189, 248, 0.1); border-radius: 10px; border-left: 4px solid var(--accent);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>LIVELLI UDITIVI</h1>
+    <p>Segui il Percorso del Suono</p>
+  </div>
+
+  <div id="container">
+    <div class="panel">
+      <canvas id="imageCanvas" width="640" height="480"></canvas>
+      <canvas id="imageOverlay" width="640" height="480" style="z-index:2;"></canvas>
+      <button id="btnNext">PROSSIMO LIVELLO ➔</button>
+      <div class="controls">
+        <strong>IMPOSTAZIONI</strong><br><br>
+        Freq: <span id="min-freq-value">200</span> - <span id="max-freq-value">700</span> Hz<br>
+        <input type="range" id="min-freq" min="100" max="500" value="200">
+        <input type="range" id="max-freq" min="500" max="2000" value="700">
+        <br><br>
+        Vol: <span id="min-vol-value">0.00</span> - <span id="max-vol-value">0.30</span><br>
+        <input type="range" id="min-vol" min="0.00" max="0.30" value="0.00" step="0.01">
+        <input type="range" id="max-vol" min="0.30" max="1.00" value="0.30" step="0.01">
+      </div>
+    </div>
+    <div class="panel">
+      <video id="input_video" width="640" height="480" playsinline muted autoplay></video>
+      <canvas id="output_canvas" width="640" height="480"></canvas>
+    </div>
+  </div>
+
+  <div class="instructions">
+    <strong>Note di utilizzo:</strong> Muovi la mano davanti alla fotocamera. La punta dell'indice (punto 8) funge da cursore. 
+    Il suono cambia in base al colore toccato: <span style="color:#ff4444">ROSSO (Start)</span>, <span style="color:#44ff44">VERDE (Finish)</span>, <strong>NERO (Tracciato)</strong>.
+  </div>
+
+  <script>
+    // --- SETUP ELEMENTI ---
+    const videoElement = document.getElementById('input_video');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const imgCanvas = document.getElementById('imageCanvas');
+    const imgCtx = imgCanvas.getContext('2d');
+    const overlayCanvas = document.getElementById('imageOverlay');
+    const overlayCtx = overlayCanvas.getContext('2d');
+    
+    // Sliders
+    const minFreqSlider = document.getElementById('min-freq');
+    const maxFreqSlider = document.getElementById('max-freq');
+    const minFreqValue = document.getElementById('min-freq-value');
+    const maxFreqValue = document.getElementById('max-freq-value');
+    const minVolSlider = document.getElementById('min-vol');
+    const maxVolSlider = document.getElementById('max-vol');
+    const minVolValue = document.getElementById('min-vol-value');
+    const maxVolValue = document.getElementById('max-vol-value');
+
+    let minFreq = 200, maxFreq = 700, minVol = 0.00, maxVol = 0.30;
+
+    minFreqSlider.oninput = function() { minFreq = parseInt(this.value); minFreqValue.textContent = minFreq; };
+    maxFreqSlider.oninput = function() { maxFreq = parseInt(this.value); maxFreqValue.textContent = maxFreq; };
+    minVolSlider.oninput = function() { minVol = parseFloat(this.value); minVolValue.textContent = minVol.toFixed(2); };
+    maxVolSlider.oninput = function() { maxVol = parseFloat(this.value); maxVolValue.textContent = maxVol.toFixed(2); };
+
+    // --- AUDIO AVANZATO (ADSR SOFT) ---
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    let oscillator = null, gainNode = null, grayscaleData = null;
+
+    function playFrequency(freq, volume = 0.5) {
+      if (!oscillator) {
+        oscillator = audioCtx.createOscillator();
+        gainNode = audioCtx.createGain();
+        oscillator.type = 'triangle'; // Suono più morbido della sine
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        oscillator.start();
+        gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+      }
+      // Transizioni dolci per evitare i click
+      oscillator.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.05);
+      gainNode.gain.setTargetAtTime(volume, audioCtx.currentTime, 0.05);
+    }
+
+    function stopFrequency() {
+      if (gainNode) gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
+    }
+
+    // --- LOGICA LIVELLI ORIGINALE ---
+    const lineWidthNera = 60, lineWidthColori = 64, colorBlockLength = 60;
+
+    const levels = [
+      function l1() {
+        fillRect("white", 0, 0, 640, 480);
+        const p1 = [50, 240], p2 = [590, 240];
+        drawTrace("black", lineWidthNera, [p1, p2]);
+        fillRect("red", p1[0] - colorBlockLength, p1[1] - lineWidthColori/2, colorBlockLength, lineWidthColori);
+        fillRect("green", p2[0], p2[1] - lineWidthColori/2, colorBlockLength, lineWidthColori);
+      },
+      function l2() {
+        fillRect("white", 0, 0, 640, 480);
+        const pStart = [50, 240], pEnd = [590, 240];
+        drawTrace("black", lineWidthNera, [pStart, [200, 240], [200, 100], [440, 100], [440, 240], pEnd]);
+        fillRect("red", pStart[0] - colorBlockLength, pStart[1] - lineWidthColori/2, colorBlockLength, lineWidthColori);
+        fillRect("green", pEnd[0], pEnd[1] - lineWidthColori/2, colorBlockLength, lineWidthColori);
+      },
+      function l3() {
+        fillRect("white", 0, 0, 640, 480);
+        const pStart = [50, 380], pEnd = [590, 260];
+        drawTrace("black", 50, [pStart, [180, 380], [180, 260], [310, 260], [310, 140], [440, 140], [440, 260], pEnd]);
+        fillRect("red", pStart[0] - colorBlockLength, pStart[1] - 54/2, colorBlockLength, 54);
+        fillRect("green", pEnd[0], pEnd[1] - 54/2, colorBlockLength, 54);
+      },
+      function l4() {
+        fillRect("white", 0, 0, 640, 480);
+        const pStart = [50, 240], pEnd = [590, 240];
+        drawTrace("black", 40, [pStart, [150, 240], [150, 100], [250, 100], [250, 240], [390, 240], [390, 100], [490, 100], [490, 240], pEnd]);
+        fillRect("red", pStart[0] - colorBlockLength, pStart[1] - 44/2, colorBlockLength, 44);
+        fillRect("green", pEnd[0], pEnd[1] - 44/2, colorBlockLength, 44);
+      },
+      function l5() {
+        fillRect("white", 0, 0, 640, 480);
+        const pStart = [50, 100], pEnd = [590, 380];
+        drawTrace("black", 30, [pStart, [540, 100], [540, 240], [220, 240], [220, 380], pEnd]);
+        fillRect("red", pStart[0] - colorBlockLength, pStart[1] - 34/2, colorBlockLength, 34);
+        fillRect("green", pEnd[0], pEnd[1] - 34/2, colorBlockLength, 34);
+      }
+    ];
+
+    function fillRect(color, x, y, w, h) { imgCtx.fillStyle = color; imgCtx.fillRect(x, y, w, h); }
+    function drawTrace(color, lineWidth, points) {
+      if (points.length < 2) return;
+      imgCtx.strokeStyle = color; imgCtx.lineWidth = lineWidth;
+      imgCtx.lineCap = "square"; imgCtx.lineJoin = "miter";
+      imgCtx.beginPath(); imgCtx.moveTo(points[0][0], points[0][1]);
+      for (let i = 1; i < points.length; i++) imgCtx.lineTo(points[i][0], points[i][1]);
+      imgCtx.stroke();
+    }
+
+    let currentLevel = 0;
+    function loadLevel(index) {
+      currentLevel = index;
+      imgCtx.clearRect(0, 0, 640, 480);
+      levels[currentLevel]();
+      const rawData = imgCtx.getImageData(0, 0, 640, 480);
+      grayscaleData = new ImageData(new Uint8ClampedArray(rawData.data), 640, 480);
+      
+      const data = grayscaleData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i]/255, g = data[i+1]/255, b = data[i+2]/255;
+        const cmax = Math.max(r, g, b), delta = cmax - Math.min(r, g, b);
+        let h = 0;
+        if (delta !== 0) {
+          if (cmax === r) h = 60 * (((g - b) / delta) % 6);
+          else if (cmax === g) h = 60 * ((b - r) / delta + 2);
+          else h = 60 * ((r - g) / delta + 4);
+        }
+        if (h < 0) h += 360;
+        data[i] = Math.round((h/360)*255);
+        data[i+1] = Math.round(((cmax === 0) ? 0 : delta/cmax)*255);
+        data[i+2] = Math.round(cmax*255);
+      }
+      document.getElementById('btnNext').innerText = `LIVELLO ${currentLevel + 1}/${levels.length} ➔`;
+    }
+
+    // --- MEDIAPIPE ---
+    const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+    hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+
+    hands.onResults(results => {
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, 640, 480);
+      canvasCtx.drawImage(results.image, 0, 0, 640, 480);
+      overlayCtx.clearRect(0, 0, 640, 480);
+
+      let handDetected = false;
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        handDetected = true;
+        for (const handLms of results.multiHandLandmarks) {
+          drawConnectors(canvasCtx, handLms, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+          drawLandmarks(canvasCtx, handLms, {color: '#FF0000', lineWidth: 1});
+          
+          const mirroredHandLms = handLms.map(l => ({ x: 1 - l.x, y: l.y, z: l.z }));
+          drawConnectors(overlayCtx, mirroredHandLms, HAND_CONNECTIONS, {color: '#38bdf8', lineWidth: 2});
+          drawLandmarks(overlayCtx, mirroredHandLms, {color: '#FF0000', lineWidth: 1});
+
+          const x = mirroredHandLms[8].x * 640, y = mirroredHandLms[8].y * 480;
+          overlayCtx.strokeStyle = 'cyan'; overlayCtx.lineWidth = 2;
+          overlayCtx.strokeRect(x - 10, y - 10, 20, 20);
+
+          if (grayscaleData) {
+            const px = Math.floor(x), py = Math.floor(y);
+            if (px >= 0 && px < 640 && py >= 0 && py < 480) {
+              const i = (py * 640 + px) * 4;
+              const h = grayscaleData.data[i], s = grayscaleData.data[i+1], v = grayscaleData.data[i+2];
+
+              const isBlack = v < 60;
+              const isWhite = v > 180 && s < 60;
+              const isRed = v > 70 && s > 100 && (h < 25 || h > 230);
+              const isGreen = v > 70 && s > 100 && (h > 60 && h < 110);
+
+              let statusText = "";
+              if (isRed) { playFrequency(880, 0.3); statusText = "START"; }
+              else if (isGreen) { playFrequency(1200, 0.4); statusText = "FINISH!"; }
+              else if (isBlack) { playFrequency(440, 0.2); statusText = "ROAD"; }
+              else if (isWhite) { playFrequency(150, 0.1); statusText = "OUT"; }
+              else { stopFrequency(); }
+
+              if (statusText !== "") {
+                overlayCtx.fillStyle = 'rgba(255,255,255,0.8)'; overlayCtx.fillRect(x + 15, y - 30, 60, 20);
+                overlayCtx.fillStyle = 'black'; overlayCtx.font = 'bold 10px sans-serif';
+                overlayCtx.fillText(statusText, x + 20, y - 16);
+              }
+            }
+          }
+        }
+      }
+      if (!handDetected) stopFrequency();
+      canvasCtx.restore();
+    });
+
+    const camera = new Camera(videoElement, { onFrame: async () => { await hands.send({image: videoElement}); }, width: 640, height: 480 });
+    document.getElementById('btnNext').onclick = () => { loadLevel((currentLevel + 1) % levels.length); };
+    camera.start();
+    loadLevel(0);
+  </script>
+</body>
+</html>

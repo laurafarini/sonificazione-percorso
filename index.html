@@ -123,46 +123,20 @@ function playStartSound() {
     if (currentToneType !== "start") {
         stopAllAudio(true);
         currentToneType = "start";
-
-        // Creiamo due oscillatori per creare un accordo armonioso
-        const osc1 = audioCtx.createOscillator();
-        const osc2 = audioCtx.createOscillator();
-        const filter = audioCtx.createBiquadFilter();
-
-        osc1.type = "sine";
-        osc2.type = "sine";
-
-        // Frequenze: Fa2 (87Hz) e Do3 (130Hz) - Un'armonia perfetta
-        osc1.frequency.setValueAtTime(87.31, audioCtx.currentTime);
-        osc2.frequency.setValueAtTime(130.81, audioCtx.currentTime);
-
-        filter.type = "lowpass";
-        filter.frequency.value = 400;
-
-        osc1.connect(filter);
-        osc2.connect(filter);
-        filter.connect(masterGain);
-
-        osc1.start();
-        osc2.start();
-        
-        // Salviamo entrambi gli oscillatori e il filtro
-        oscillators = [osc1, osc2, filter];
+        const osc = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        osc.type = "square"; // Suono più "retro-game"
+        osc.frequency.setValueAtTime(110, audioCtx.currentTime); 
+        osc.connect(g);
+        g.connect(masterGain);
+        osc.start();
+        oscillators = [osc, g];
     }
-
-    // Effetto "Respiro": il volume e il filtro oscillano lentamente insieme
-    const now = audioCtx.currentTime;
-    const breathe = Math.sin(now * 3) * 0.5 + 0.5; // Valore tra 0 e 1
     
-    // Moduliamo il volume in modo molto dolce
-    const smoothVol = 0.15 + (breathe * 0.15); 
-    masterGain.gain.setTargetAtTime(smoothVol, now, 0.1);
-
-    // Moduliamo il filtro per rendere il suono più "brillante" e poi più "chiuso"
-    if (oscillators[2]) {
-        const filterFreq = 300 + (breathe * 600);
-        oscillators[2].frequency.setTargetAtTime(filterFreq, now, 0.1);
-    }
+    // Crea un battito ritmico automatico
+    const now = audioCtx.currentTime;
+    const lfo = Math.sin(now * 10) * 0.5 + 0.5; // Pulsazione veloce
+    masterGain.gain.setTargetAtTime(0.1 + (lfo * 0.2), now, 0.05);
 }
 
 // BIANCO: Fuori -> Un "Ronzio" elettrico fastidioso (distinguibile dal rosso)

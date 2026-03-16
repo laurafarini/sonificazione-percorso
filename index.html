@@ -89,124 +89,175 @@
     const overlayCanvas = document.getElementById('imageOverlay');
     const overlayCtx = overlayCanvas.getContext('2d');
     
-    // Sliders
-    const minFreqSlider = document.getElementById('min-freq');
-    const maxFreqSlider = document.getElementById('max-freq');
-    const minFreqValue = document.getElementById('min-freq-value');
-    const maxFreqValue = document.getElementById('max-freq-value');
-    const minVolSlider = document.getElementById('min-vol');
-    const maxVolSlider = document.getElementById('max-vol');
-    const minVolValue = document.getElementById('min-vol-value');
-    const maxVolValue = document.getElementById('max-vol-value');
+    let grayscaleData = null;
+    let hasWon = false;
 
-    let minFreq = 200, maxFreq = 700, minVol = 0.00, maxVol = 0.30;
+ // --- AUDIO ENGINE DEFINITIVO ---
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+const masterGain = audioCtx.createGain();
+masterGain.connect(audioCtx.destination);
 
-    minFreqSlider.oninput = function() { minFreq = parseInt(this.value); minFreqValue.textContent = minFreq; };
-    maxFreqSlider.oninput = function() { maxFreq = parseInt(this.value); maxFreqValue.textContent = maxFreq; };
-    minVolSlider.oninput = function() { minVol = parseFloat(this.value); minVolValue.textContent = minVol.toFixed(2); };
-    maxVolSlider.oninput = function() { maxVol = parseFloat(this.value); maxVolValue.textContent = maxVol.toFixed(2); };
+const scale = [174.61, 196.00, 220.00, 261.63, 293.66, 349.23, 392.00];
+let oscillators = [];
+let currentToneType = "";
 
-    // --- AUDIO AVANZATO (ADSR SOFT) ---
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    let oscillator = null, gainNode = null, grayscaleData = null;
-
-    function playFrequency(freq, volume = 0.5) {
-      if (!oscillator) {
-        oscillator = audioCtx.createOscillator();
-        gainNode = audioCtx.createGain();
-        oscillator.type = 'triangle'; // Suono più morbido della sine
-        oscillator.connect(gainNode);
-        gainNode.connect(audioCtx.destination);
-        oscillator.start();
-        gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
-      }
-      // Transizioni dolci per evitare i click
-      oscillator.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.05);
-      gainNode.gain.setTargetAtTime(volume, audioCtx.currentTime, 0.05);
+function stopAllAudio(instant = false) {
+    const now = audioCtx.currentTime;
+    masterGain.gain.cancelScheduledValues(now);
+    
+    if (instant) {
+        masterGain.gain.setValueAtTime(0, now);
+    } else {
+        masterGain.gain.setTargetAtTime(0, now, 0.015);
     }
 
-    function stopFrequency() {
-      if (gainNode) gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.1);
+    // Fermiamo gli oscillatori vecchi
+    oscillators.forEach(o => { try { o.stop(now + 0.1); } catch(e){} });
+    oscillators = [];
+    currentToneType = "";
+}
+
+// ROSSO: Start -> Suono Etereo e Armonico (Effetto "Respiro")
+function playStartSound() {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    if (currentToneType !== "start") {
+        stopAllAudio(true);
+        currentToneType = "start";
+
+        // Creiamo due oscillatori per creare un accordo armonioso
+        const osc1 = audioCtx.createOscillator();
+        const osc2 = audioCtx.createOscillator();
+        const filter = audioCtx.createBiquadFilter();
+
+        osc1.type = "sine";
+        osc2.type = "sine";
+
+        // Frequenze: Fa2 (87Hz) e Do3 (130Hz) - Un'armonia perfetta
+        osc1.frequency.setValueAtTime(87.31, audioCtx.currentTime);
+        osc2.frequency.setValueAtTime(130.81, audioCtx.currentTime);
+
+        filter.type = "lowpass";
+        filter.frequency.value = 400;
+
+        osc1.connect(filter);
+        osc2.connect(filter);
+        filter.connect(masterGain);
+
+        osc1.start();
+        osc2.start();
+        
+        // Salviamo entrambi gli oscillatori e il filtro
+        oscillators = [osc1, osc2, filter];
     }
 
-    // --- LOGICA LIVELLI ORIGINALE ---
+    // Effetto "Respiro": il volume e il filtro oscillano lentamente insieme
+    const now = audioCtx.currentTime;
+    const breathe = Math.sin(now * 3) * 0.5 + 0.5; // Valore tra 0 e 1
+    
+    // Moduliamo il volume in modo molto dolce
+    const smoothVol = 0.15 + (breathe * 0.15); 
+    masterGain.gain.setTargetAtTime(smoothVol, now, 0.1);
+
+    // Moduliamo il filtro per rendere il suono più "brillante" e poi più "chiuso"
+    if (oscillators[2]) {
+        const filterFreq = 300 + (breathe * 600);
+        oscillators[2].frequency.setTargetAtTime(filterFreq, now, 0.1);
+    }
+}
+
+// BIANCO: Fuori -> Un "Ronzio" elettrico fastidioso (distinguibile dal rosso)
+function playErrorSound() {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    if (currentToneType !== "error") {
+        stopAllAudio(true);
+        currentToneType = "error";
+        
+        const osc = audioCtx.createOscillator();
+        const noiseFilter = audioCtx.createBiquadFilter();
+        
+        osc.type = "sawtooth"; // L'onda a dente di sega è "graffiante"
+        osc.frequency.setValueAtTime(55, audioCtx.currentTime); // Nota "La" molto bassa
+        
+        noiseFilter.type = "bandpass"; // Fa passare solo una fascia di frequenze "sporche"
+        noiseFilter.frequency.value = 120;
+        
+        osc.connect(noiseFilter);
+        noiseFilter.connect(masterGain);
+        osc.start();
+        oscillators = [osc];
+    }
+    masterGain.gain.setTargetAtTime(0.25, audioCtx.currentTime, 0.02);
+}
+
+// NERO: Percorso -> Suono puro e armonico
+function playPathSound(normX) {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const now = audioCtx.currentTime;
+    const noteIndex = Math.floor(normX * scale.length);
+    const freq = scale[Math.min(noteIndex, scale.length - 1)];
+
+    if (currentToneType !== "path") {
+        stopAllAudio(true);
+        currentToneType = "path";
+        const osc = audioCtx.createOscillator();
+        osc.type = "triangle"; // Dolce e flautato
+        osc.connect(masterGain);
+        osc.start();
+        oscillators = [osc];
+    }
+    // Portamento fluido tra le note
+    oscillators[0].frequency.setTargetAtTime(freq, now, 0.08);
+    masterGain.gain.setTargetAtTime(0.3, now, 0.05);
+}
+
+    // VERDE: Arpeggio di Vittoria
+    function playVictorySound() {
+        stopAllAudio();
+        const now = audioCtx.currentTime;
+        [523.25, 659.25, 783.99, 1046.50].forEach((f, i) => {
+            const osc = audioCtx.createOscillator();
+            const g = audioCtx.createGain();
+            osc.type = "sine";
+            osc.frequency.value = f;
+            osc.connect(g);
+            g.connect(audioCtx.destination);
+            g.gain.setValueAtTime(0, now + (i*0.1));
+            g.gain.linearRampToValueAtTime(0.3, now + (i*0.1) + 0.02);
+            g.gain.exponentialRampToValueAtTime(0.001, now + (i*0.1) + 0.5);
+            osc.start(now + (i*0.1));
+            osc.stop(now + (i*0.1) + 0.6);
+        });
+    }
+
+    // --- LOGICA LIVELLI ---
     const lineWidthNera = 60, lineWidthColori = 64, colorBlockLength = 60;
-
     const levels = [
-      function l1() {
-        fillRect("white", 0, 0, 640, 480);
-        const p1 = [50, 240], p2 = [590, 240];
-        drawTrace("black", lineWidthNera, [p1, p2]);
-        fillRect("red", p1[0] - colorBlockLength, p1[1] - lineWidthColori/2, colorBlockLength, lineWidthColori);
-        fillRect("green", p2[0], p2[1] - lineWidthColori/2, colorBlockLength, lineWidthColori);
-      },
-      function l2() {
-        fillRect("white", 0, 0, 640, 480);
-        const pStart = [50, 240], pEnd = [590, 240];
-        drawTrace("black", lineWidthNera, [pStart, [200, 240], [200, 100], [440, 100], [440, 240], pEnd]);
-        fillRect("red", pStart[0] - colorBlockLength, pStart[1] - lineWidthColori/2, colorBlockLength, lineWidthColori);
-        fillRect("green", pEnd[0], pEnd[1] - lineWidthColori/2, colorBlockLength, lineWidthColori);
-      },
-      function l3() {
-        fillRect("white", 0, 0, 640, 480);
-        const pStart = [50, 380], pEnd = [590, 260];
-        drawTrace("black", 50, [pStart, [180, 380], [180, 260], [310, 260], [310, 140], [440, 140], [440, 260], pEnd]);
-        fillRect("red", pStart[0] - colorBlockLength, pStart[1] - 54/2, colorBlockLength, 54);
-        fillRect("green", pEnd[0], pEnd[1] - 54/2, colorBlockLength, 54);
-      },
-      function l4() {
-        fillRect("white", 0, 0, 640, 480);
-        const pStart = [50, 240], pEnd = [590, 240];
-        drawTrace("black", 40, [pStart, [150, 240], [150, 100], [250, 100], [250, 240], [390, 240], [390, 100], [490, 100], [490, 240], pEnd]);
-        fillRect("red", pStart[0] - colorBlockLength, pStart[1] - 44/2, colorBlockLength, 44);
-        fillRect("green", pEnd[0], pEnd[1] - 44/2, colorBlockLength, 44);
-      },
-      function l5() {
-        fillRect("white", 0, 0, 640, 480);
-        const pStart = [50, 100], pEnd = [590, 380];
-        drawTrace("black", 30, [pStart, [540, 100], [540, 240], [220, 240], [220, 380], pEnd]);
-        fillRect("red", pStart[0] - colorBlockLength, pStart[1] - 34/2, colorBlockLength, 34);
-        fillRect("green", pEnd[0], pEnd[1] - 34/2, colorBlockLength, 34);
-      }
+      function l1() { fillRect("white", 0, 0, 640, 480); drawTrace("black", lineWidthNera, [[50, 240], [590, 240]]); fillRect("red", 50-60, 240-32, 60, 64); fillRect("green", 590, 240-32, 60, 64); },
+      function l2() { fillRect("white", 0, 0, 640, 480); drawTrace("black", 60, [[50, 240], [200, 240], [200, 100], [440, 100], [440, 240], [590, 240]]); fillRect("red", 50-60, 240-32, 60, 64); fillRect("green", 590, 240-32, 60, 64); },
+      function l3() { fillRect("white", 0, 0, 640, 480); drawTrace("black", 50, [[50, 380], [180, 380], [180, 260], [310, 260], [310, 140], [440, 140], [440, 260], [590, 260]]); fillRect("red", 50-60, 380-25, 60, 50); fillRect("green", 590, 260-25, 60, 50); },
+      function l4() { fillRect("white", 0, 0, 640, 480); drawTrace("black", 40, [[50, 240], [150, 240], [150, 100], [250, 100], [250, 240], [390, 240], [390, 100], [490, 100], [490, 240], [590, 240]]); fillRect("red", 50-60, 240-20, 60, 40); fillRect("green", 590, 240-20, 60, 40); },
+      function l5() { fillRect("white", 0, 0, 640, 480); drawTrace("black", 30, [[50, 100], [540, 100], [540, 240], [220, 240], [220, 380], [590, 380]]); fillRect("red", 50-60, 100-15, 60, 30); fillRect("green", 590, 380-15, 60, 30); }
     ];
 
-    function fillRect(color, x, y, w, h) { imgCtx.fillStyle = color; imgCtx.fillRect(x, y, w, h); }
-    function drawTrace(color, lineWidth, points) {
-      if (points.length < 2) return;
-      imgCtx.strokeStyle = color; imgCtx.lineWidth = lineWidth;
-      imgCtx.lineCap = "square"; imgCtx.lineJoin = "miter";
-      imgCtx.beginPath(); imgCtx.moveTo(points[0][0], points[0][1]);
-      for (let i = 1; i < points.length; i++) imgCtx.lineTo(points[i][0], points[i][1]);
-      imgCtx.stroke();
-    }
+    function fillRect(c, x, y, w, h) { imgCtx.fillStyle = c; imgCtx.fillRect(x, y, w, h); }
+    function drawTrace(c, lw, pts) { imgCtx.strokeStyle = c; imgCtx.lineWidth = lw; imgCtx.lineCap = "round"; imgCtx.lineJoin = "round"; imgCtx.beginPath(); imgCtx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) imgCtx.lineTo(pts[i][0], pts[i][1]); imgCtx.stroke(); }
 
     let currentLevel = 0;
-    function loadLevel(index) {
-      currentLevel = index;
-      imgCtx.clearRect(0, 0, 640, 480);
-      levels[currentLevel]();
-      const rawData = imgCtx.getImageData(0, 0, 640, 480);
-      grayscaleData = new ImageData(new Uint8ClampedArray(rawData.data), 640, 480);
-      
-      const data = grayscaleData.data;
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i]/255, g = data[i+1]/255, b = data[i+2]/255;
-        const cmax = Math.max(r, g, b), delta = cmax - Math.min(r, g, b);
-        let h = 0;
-        if (delta !== 0) {
-          if (cmax === r) h = 60 * (((g - b) / delta) % 6);
-          else if (cmax === g) h = 60 * ((b - r) / delta + 2);
-          else h = 60 * ((r - g) / delta + 4);
-        }
-        if (h < 0) h += 360;
-        data[i] = Math.round((h/360)*255);
-        data[i+1] = Math.round(((cmax === 0) ? 0 : delta/cmax)*255);
-        data[i+2] = Math.round(cmax*255);
+    function loadLevel(idx) {
+      currentLevel = idx; hasWon = false;
+      imgCtx.clearRect(0, 0, 640, 480); levels[currentLevel]();
+      const raw = imgCtx.getImageData(0, 0, 640, 480);
+      grayscaleData = new ImageData(new Uint8ClampedArray(raw.data), 640, 480);
+      const d = grayscaleData.data;
+      for (let i = 0; i < d.length; i += 4) {
+        let r=d[i]/255, g=d[i+1]/255, b=d[i+2]/255, max=Math.max(r,g,b), min=Math.min(r,g,b), delta=max-min, h=0;
+        if(delta!==0){ if(max===r) h=60*(((g-b)/delta)%6); else if(max===g) h=60*((b-r)/delta+2); else h=60*((r-g)/delta+4); }
+        d[i]=Math.round(((h<0?h+360:h)/360)*255); d[i+1]=Math.round((max===0?0:delta/max)*255); d[i+2]=Math.round(max*255);
       }
       document.getElementById('btnNext').innerText = `LIVELLO ${currentLevel + 1}/${levels.length} ➔`;
     }
 
-    // --- MEDIAPIPE ---
+    // --- MEDIAPIPE & LOOP ---
     const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
     hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
 
@@ -220,15 +271,23 @@
       if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
         handDetected = true;
         for (const handLms of results.multiHandLandmarks) {
+          // DISEGNO ORIGINALE SUL VIDEO (Verde e Rosso)
           drawConnectors(canvasCtx, handLms, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
           drawLandmarks(canvasCtx, handLms, {color: '#FF0000', lineWidth: 1});
           
+          // DISEGNO SPECULARE SUL CANVAS LIVELLI
           const mirroredHandLms = handLms.map(l => ({ x: 1 - l.x, y: l.y, z: l.z }));
           drawConnectors(overlayCtx, mirroredHandLms, HAND_CONNECTIONS, {color: '#38bdf8', lineWidth: 2});
           drawLandmarks(overlayCtx, mirroredHandLms, {color: '#FF0000', lineWidth: 1});
 
-          const x = mirroredHandLms[8].x * 640, y = mirroredHandLms[8].y * 480;
-          overlayCtx.strokeStyle = 'cyan'; overlayCtx.lineWidth = 2;
+          // COORDINATE PUNTA INDICE (PUNTO 8)
+          const x = mirroredHandLms[8].x * 640;
+          const y = mirroredHandLms[8].y * 480;
+          const normX = mirroredHandLms[8].x;
+
+          // MIRINO SULL'INDICE
+          overlayCtx.strokeStyle = 'cyan'; 
+          overlayCtx.lineWidth = 2;
           overlayCtx.strokeRect(x - 10, y - 10, 20, 20);
 
           if (grayscaleData) {
@@ -243,29 +302,51 @@
               const isGreen = v > 70 && s > 100 && (h > 60 && h < 110);
 
               let statusText = "";
-              if (isRed) { playFrequency(880, 0.3); statusText = "START"; }
-              else if (isGreen) { playFrequency(1200, 0.4); statusText = "FINISH!"; }
-              else if (isBlack) { playFrequency(440, 0.2); statusText = "ROAD"; }
-              else if (isWhite) { playFrequency(150, 0.1); statusText = "OUT"; }
-              else { stopFrequency(); }
+
+              if (isRed) { 
+                  statusText = "START";
+                  hasWon = false; 
+                  playStartSound();
+              }
+              else if (isGreen) { 
+                  statusText = "FINISH!";
+                  if (!hasWon) {
+                      playVictorySound(); 
+                      hasWon = true;      
+                  }
+              }
+              else if (isBlack) { 
+                  statusText = "ROAD";
+                  hasWon = false; 
+                  playPathSound(normX);
+              }
+              else if (isWhite) { 
+                  statusText = "OUT";
+                  hasWon = false;
+                  playErrorSound(); 
+              }
+              else { 
+                  stopAllAudio();
+              }
 
               if (statusText !== "") {
-                overlayCtx.fillStyle = 'rgba(255,255,255,0.8)'; overlayCtx.fillRect(x + 15, y - 30, 60, 20);
-                overlayCtx.fillStyle = 'black'; overlayCtx.font = 'bold 10px sans-serif';
+                overlayCtx.fillStyle = 'rgba(255,255,255,0.8)'; 
+                overlayCtx.fillRect(x + 15, y - 30, 60, 20);
+                overlayCtx.fillStyle = 'black'; 
+                overlayCtx.font = 'bold 10px sans-serif';
                 overlayCtx.fillText(statusText, x + 20, y - 16);
               }
             }
           }
         }
       }
-      if (!handDetected) stopFrequency();
+      if (!handDetected) stopAllAudio();
       canvasCtx.restore();
     });
 
     const camera = new Camera(videoElement, { onFrame: async () => { await hands.send({image: videoElement}); }, width: 640, height: 480 });
     document.getElementById('btnNext').onclick = () => { loadLevel((currentLevel + 1) % levels.length); };
-    camera.start();
-    loadLevel(0);
+    camera.start(); loadLevel(0);
   </script>
 </body>
 </html>

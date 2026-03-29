@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Livelli uditivi - Pro</title>
+  <title>SonicPath - Pro</title>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -10,16 +10,12 @@
       --bg: #0f172a;
       --accent: #38bdf8;
     }
-    body { 
-      margin: 0; background: var(--bg); font-family: 'Segoe UI', sans-serif; 
-      display: flex; flex-direction: column; align-items: center; padding: 20px; color: white;
-    }
+    body { margin: 0; background: var(--bg); font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px; color: white; }
     .header { text-align: center; margin-bottom: 20px; }
     #container { display: flex; flex-direction: row; gap: 20px; background: #1e293b; padding: 15px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-    
     .panel { position: relative; width: 640px; height: 480px; border-radius: 10px; overflow: hidden; border: 2px solid #334155; }
-    
-    /* Cruciale: dimensioni fisse per evitare zoom */
+
+    /* dimensioni fisse per evitare zoom */
     canvas, video { position: absolute; top: 0; left: 0; width: 640px !important; height: 480px !important; }
     
     video { transform: scaleX(-1); } 
@@ -48,7 +44,7 @@
 <body>
 
   <div class="header">
-    <h1>LIVELLI UDITIVI</h1>
+    <h1>SonicPath</h1>
     <p>Segui il Percorso del Suono</p>
   </div>
 
@@ -92,35 +88,35 @@
     let grayscaleData = null;
     let hasWon = false;
 
- // --- AUDIO ENGINE DEFINITIVO ---
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-const masterGain = audioCtx.createGain();
-masterGain.connect(audioCtx.destination);
+    // --- AUDIO ENGINE DEFINITIVO ---
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const masterGain = audioCtx.createGain();
+    masterGain.connect(audioCtx.destination);
 
-const scale = [174.61, 196.00, 220.00, 261.63, 293.66, 349.23, 392.00];
-let oscillators = [];
-let currentToneType = "";
+    const scale = [174.61, 196.00, 220.00, 261.63, 293.66, 349.23, 392.00];
+    let oscillators = [];
+    let currentToneType = "";
 
-function stopAllAudio(instant = false) {
-    const now = audioCtx.currentTime;
-    masterGain.gain.cancelScheduledValues(now);
+    function stopAllAudio(instant = false) {
+      const now = audioCtx.currentTime;
+      masterGain.gain.cancelScheduledValues(now);
     
-    if (instant) {
+      if (instant) {
         masterGain.gain.setValueAtTime(0, now);
-    } else {
+      } else {
         masterGain.gain.setTargetAtTime(0, now, 0.015);
-    }
+      }
 
     // Fermiamo gli oscillatori vecchi
     oscillators.forEach(o => { try { o.stop(now + 0.1); } catch(e){} });
     oscillators = [];
     currentToneType = "";
-}
+    }
 
-// ROSSO: Start -> Suono Etereo e Armonico (Effetto "Respiro")
-function playStartSound() {
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    if (currentToneType !== "start") {
+    // ROSSO: Start -> Suono armonico
+    function playStartSound() {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      if (currentToneType !== "start") {
         stopAllAudio(true);
         currentToneType = "start";
         const osc = audioCtx.createOscillator();
@@ -131,18 +127,18 @@ function playStartSound() {
         g.connect(masterGain);
         osc.start();
         oscillators = [osc, g];
-    }
+      }
     
     // Crea un battito ritmico automatico
     const now = audioCtx.currentTime;
     const lfo = Math.sin(now * 10) * 0.5 + 0.5; // Pulsazione veloce
     masterGain.gain.setTargetAtTime(0.1 + (lfo * 0.2), now, 0.05);
-}
+    }
 
-// BIANCO: Fuori -> Un "Ronzio" elettrico fastidioso (distinguibile dal rosso)
-function playErrorSound() {
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    if (currentToneType !== "error") {
+    // BIANCO: Out -> Un "Ronzio" elettrico fastidioso
+    function playErrorSound() {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      if (currentToneType !== "error") {
         stopAllAudio(true);
         currentToneType = "error";
         
@@ -159,18 +155,18 @@ function playErrorSound() {
         noiseFilter.connect(masterGain);
         osc.start();
         oscillators = [osc];
+      }
+      masterGain.gain.setTargetAtTime(0.25, audioCtx.currentTime, 0.02);
     }
-    masterGain.gain.setTargetAtTime(0.25, audioCtx.currentTime, 0.02);
-}
 
-// NERO: Percorso -> Suono puro e armonico
-function playPathSound(normX) {
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    const now = audioCtx.currentTime;
-    const noteIndex = Math.floor(normX * scale.length);
-    const freq = scale[Math.min(noteIndex, scale.length - 1)];
+    // NERO: Road -> Suono puro e armonico
+    function playPathSound(normX) {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const now = audioCtx.currentTime;
+      const noteIndex = Math.floor(normX * scale.length);
+      const freq = scale[Math.min(noteIndex, scale.length - 1)];
 
-    if (currentToneType !== "path") {
+      if (currentToneType !== "path") {
         stopAllAudio(true);
         currentToneType = "path";
         const osc = audioCtx.createOscillator();
@@ -178,20 +174,19 @@ function playPathSound(normX) {
         osc.connect(masterGain);
         osc.start();
         oscillators = [osc];
+      }
+      oscillators[0].frequency.setTargetAtTime(freq, now, 0.08);
+      masterGain.gain.setTargetAtTime(0.3, now, 0.05);
     }
-    // Portamento fluido tra le note
-    oscillators[0].frequency.setTargetAtTime(freq, now, 0.08);
-    masterGain.gain.setTargetAtTime(0.3, now, 0.05);
-}
 
     // VERDE: Arpeggio di Vittoria
     function playVictorySound() {
-        stopAllAudio();
-        const now = audioCtx.currentTime;
-        [523.25, 659.25, 783.99, 1046.50].forEach((f, i) => {
-            const osc = audioCtx.createOscillator();
-            const g = audioCtx.createGain();
-            osc.type = "sine";
+      stopAllAudio();
+      const now = audioCtx.currentTime;
+      [523.25, 659.25, 783.99, 1046.50].forEach((f, i) => {
+        const osc = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        osc.type = "sine";
             osc.frequency.value = f;
             osc.connect(g);
             g.connect(audioCtx.destination);
@@ -200,33 +195,82 @@ function playPathSound(normX) {
             g.gain.exponentialRampToValueAtTime(0.001, now + (i*0.1) + 0.5);
             osc.start(now + (i*0.1));
             osc.stop(now + (i*0.1) + 0.6);
-        });
+      });
     }
 
     // --- LOGICA LIVELLI ---
     const lineWidthNera = 60, lineWidthColori = 64, colorBlockLength = 60;
+
     const levels = [
-      function l1() { fillRect("white", 0, 0, 640, 480); drawTrace("black", lineWidthNera, [[50, 240], [590, 240]]); fillRect("red", 50-60, 240-32, 60, 64); fillRect("green", 590, 240-32, 60, 64); },
-      function l2() { fillRect("white", 0, 0, 640, 480); drawTrace("black", 60, [[50, 240], [200, 240], [200, 100], [440, 100], [440, 240], [590, 240]]); fillRect("red", 50-60, 240-32, 60, 64); fillRect("green", 590, 240-32, 60, 64); },
-      function l3() { fillRect("white", 0, 0, 640, 480); drawTrace("black", 50, [[50, 380], [180, 380], [180, 260], [310, 260], [310, 140], [440, 140], [440, 260], [590, 260]]); fillRect("red", 50-60, 380-25, 60, 50); fillRect("green", 590, 260-25, 60, 50); },
-      function l4() { fillRect("white", 0, 0, 640, 480); drawTrace("black", 40, [[50, 240], [150, 240], [150, 100], [250, 100], [250, 240], [390, 240], [390, 100], [490, 100], [490, 240], [590, 240]]); fillRect("red", 50-60, 240-20, 60, 40); fillRect("green", 590, 240-20, 60, 40); },
-      function l5() { fillRect("white", 0, 0, 640, 480); drawTrace("black", 30, [[50, 100], [540, 100], [540, 240], [220, 240], [220, 380], [590, 380]]); fillRect("red", 50-60, 100-15, 60, 30); fillRect("green", 590, 380-15, 60, 30); }
+      function l1() { 
+        fillRect("white", 0, 0, 640, 480); 
+        drawTrace("black", lineWidthNera, [[50, 240], [590, 240]]); 
+        fillRect("red", 50-60, 240-32, 60, 64); 
+        fillRect("green", 590, 240-32, 60, 64); 
+      },
+      function l2() { 
+        fillRect("white", 0, 0, 640, 480); 
+        drawTrace("black", 60, [[50, 240], [200, 240], [200, 100], [440, 100], [440, 240], [590, 240]]); 
+        fillRect("red", 50-60, 240-32, 60, 64); 
+        fillRect("green", 590, 240-32, 60, 64); 
+      },
+      function l3() { 
+        fillRect("white", 0, 0, 640, 480); 
+        drawTrace("black", 50, [[50, 380], [180, 380], [180, 260], [310, 260], [310, 140], [440, 140], [440, 260], [590, 260]]); 
+        fillRect("red", 50-60, 380-25, 60, 50); 
+        fillRect("green", 590, 260-25, 60, 50); 
+      },
+      function l4() { 
+        fillRect("white", 0, 0, 640, 480); 
+        drawTrace("black", 40, [[50, 240], [150, 240], [150, 100], [250, 100], [250, 240], [390, 240], [390, 100], [490, 100], [490, 240], [590, 240]]); 
+        fillRect("red", 50-60, 240-20, 60, 40); 
+        fillRect("green", 590, 240-20, 60, 40); 
+      },
+      function l5() { 
+        fillRect("white", 0, 0, 640, 480); 
+        drawTrace("black", 30, [[50, 100], [540, 100], [540, 240], [220, 240], [220, 380], [590, 380]]); 
+        fillRect("red", 50-60, 100-15, 60, 30); 
+        fillRect("green", 590, 380-15, 60, 30); 
+      }
     ];
 
-    function fillRect(c, x, y, w, h) { imgCtx.fillStyle = c; imgCtx.fillRect(x, y, w, h); }
-    function drawTrace(c, lw, pts) { imgCtx.strokeStyle = c; imgCtx.lineWidth = lw; imgCtx.lineCap = "round"; imgCtx.lineJoin = "round"; imgCtx.beginPath(); imgCtx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) imgCtx.lineTo(pts[i][0], pts[i][1]); imgCtx.stroke(); }
+    function fillRect(c, x, y, w, h) { 
+      imgCtx.fillStyle = c; 
+      imgCtx.fillRect(x, y, w, h); 
+    }
+
+    function drawTrace(c, lw, pts) { 
+      imgCtx.strokeStyle = c; 
+      imgCtx.lineWidth = lw; 
+      imgCtx.lineCap = "round"; 
+      imgCtx.lineJoin = "round"; 
+      imgCtx.beginPath(); 
+      imgCtx.moveTo(pts[0][0], pts[0][1]); 
+      for (let i = 1; i < pts.length; i++) imgCtx.lineTo(pts[i][0], pts[i][1]); 
+      imgCtx.stroke(); 
+    }
 
     let currentLevel = 0;
     function loadLevel(idx) {
-      currentLevel = idx; hasWon = false;
-      imgCtx.clearRect(0, 0, 640, 480); levels[currentLevel]();
+      currentLevel = idx; 
+      hasWon = false;
+      imgCtx.clearRect(0, 0, 640, 480); 
+      levels[currentLevel]();
+
       const raw = imgCtx.getImageData(0, 0, 640, 480);
       grayscaleData = new ImageData(new Uint8ClampedArray(raw.data), 640, 480);
       const d = grayscaleData.data;
+
       for (let i = 0; i < d.length; i += 4) {
         let r=d[i]/255, g=d[i+1]/255, b=d[i+2]/255, max=Math.max(r,g,b), min=Math.min(r,g,b), delta=max-min, h=0;
-        if(delta!==0){ if(max===r) h=60*(((g-b)/delta)%6); else if(max===g) h=60*((b-r)/delta+2); else h=60*((r-g)/delta+4); }
-        d[i]=Math.round(((h<0?h+360:h)/360)*255); d[i+1]=Math.round((max===0?0:delta/max)*255); d[i+2]=Math.round(max*255);
+        if(delta!==0){ 
+          if(max===r) h=60*(((g-b)/delta)%6); 
+          else if(max===g) h=60*((b-r)/delta+2); 
+          else h=60*((r-g)/delta+4); 
+        }
+        d[i]=Math.round(((h<0?h+360:h)/360)*255); 
+        d[i+1]=Math.round((max===0?0:delta/max)*255); 
+        d[i+2]=Math.round(max*255);
       }
       document.getElementById('btnNext').innerText = `LIVELLO ${currentLevel + 1}/${levels.length} ➔`;
     }

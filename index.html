@@ -87,6 +87,7 @@
     
     let grayscaleData = null;
     let hasWon = false;
+    let isPathActive = false; // Indica se l'utente è partito correttamente dal rosso
 
     // --- AUDIO ENGINE DEFINITIVO ---
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -321,31 +322,48 @@
 
               let statusText = "";
 
-              if (isRed) { 
-                  statusText = "START";
-                  hasWon = false; 
-                  playStartSound();
-              }
-              else if (isGreen) { 
-                  statusText = "FINISH!";
-                  if (!hasWon) {
-                      playVictorySound(); 
-                      hasWon = true;      
-                  }
-              }
-              else if (isBlack) { 
-                  statusText = "ROAD";
-                  hasWon = false; 
-                  playPathSound(normX);
+             // 1. Il ROSSO è l'interruttore universale
+            if (isRed) { 
+              statusText = "START";
+              isPathActive = true; // ATTIVA TUTTO
+              hasWon = false; 
+              playStartSound();
+            }
+
+            // 2. Se l'interruttore è ACCESO, allora gestiamo gli altri suoni
+            else if (isPathActive) {
+              
+              if (isBlack) { 
+                statusText = "ROAD";
+                playPathSound(normX); // Senti il nero solo se sei partito
               }
               else if (isWhite) { 
-                  statusText = "OUT";
-                  hasWon = false;
-                  playErrorSound(); 
+                statusText = "OUT";
+                playErrorSound(); // Senti il bianco solo se sei partito
               }
-              else { 
-                  stopAllAudio();
+              else if (isGreen) { 
+                if (!hasWon) {
+                  statusText = "FINISH";
+                  playVictorySound();
+                  hasWon = true;
+                  isPathActive = false; 
+    
+
+                  setTimeout(() => {
+                    loadLevel((currentLevel + 1) % levels.length);
+                  }, 1500);
+                }
               }
+              else {
+                stopAllAudio();
+              }
+            } 
+
+            // 3. Se l'interruttore è SPENTO (non hai ancora toccato il rosso)
+            else {
+              statusText = "GO TO RED";
+              stopAllAudio(); // Silenzio assoluto
+            }
 
               if (statusText !== "") {
                 overlayCtx.fillStyle = 'rgba(255,255,255,0.8)'; 
